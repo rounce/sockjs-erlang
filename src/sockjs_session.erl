@@ -170,6 +170,8 @@ emit(What, State = #session{callback = Callback,
 
 mh(#session{hibernate_delay = hibernate} = State) -> {State, hibernate};
 
+mh(#session{hibernate_delay = HibTimeout, heartbeat_delay = HeartbeatDelay} = State) when HibTimeout >= HeartbeatDelay -> {State, infinity};
+
 mh(#session{hibernate_delay = HibTimeout, hibernate_tref = TRef} = State) ->
     case TRef of
         undefined -> ok;
@@ -233,7 +235,6 @@ handle_call({reply, Pid, Multiple}, _From, State = #session{
                                              ready_state     = open,
                                              response_pid    = RPid,
                                              heartbeat_tref  = HeartbeatTRef,
-                                             hibernate_delay = HibTimeout,
                                              outbound_queue  = Q})
   when RPid == undefined orelse RPid == Pid ->
     {Messages, Q1} = case Multiple of
@@ -306,7 +307,8 @@ handle_info(hibernate_triggered, State) ->
 
 handle_info(heartbeat_triggered, State = #session{response_pid = RPid}) when RPid =/= undefined ->
     RPid ! go,
-    {noreply, State#session{heartbeat_tref = triggered}};
+    {State2, Timeout} = mh(State),
+    {noreply, State2#session{heartbeat_tref = triggered}, Timeout};
 
 handle_info(Info, State) ->
     {stop, {odd_info, Info}, State}.
