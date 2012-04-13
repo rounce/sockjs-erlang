@@ -31,7 +31,7 @@ terminate(_Req, _Service) ->
 %% --------------------------------------------------------------------------
 
 websocket_init(_TransportName, Req,
-               Service = #service{logger = Logger, hib_timeout = HibTimeout}) ->
+               Service = #service{logger = Logger}) ->
     Req0 = Logger(Service, {cowboy, Req}, websocket),
 
     {Info, Req1} = sockjs_handler:extract_info(Req0),
@@ -43,9 +43,9 @@ websocket_init(_TransportName, Req,
                 {WS, Req2}
         end,
     self() ! go,
-    {ok, Req3, {RawWebsocket, SessionPid, {undefined, HibTimeout}}}.
+    {ok, Req3, {RawWebsocket, SessionPid}}.
 
-websocket_handle({text, Data}, Req, {RawWebsocket, SessionPid, _HT} = S) ->
+websocket_handle({text, Data}, Req, {RawWebsocket, SessionPid} = S) ->
     case sockjs_ws_handler:received(RawWebsocket, SessionPid, Data) of
         {ok, Timeout} -> {ok, Req, S, Timeout};
         shutdown      -> {shutdown, Req, S}
@@ -53,20 +53,20 @@ websocket_handle({text, Data}, Req, {RawWebsocket, SessionPid, _HT} = S) ->
 websocket_handle(_Unknown, Req, S) ->
     {shutdown, Req, S}.
 
-websocket_info(go, Req, {RawWebsocket, SessionPid, {_, HT}} = S) ->
+websocket_info(go, Req, {RawWebsocket, SessionPid} = S) ->
     case sockjs_ws_handler:reply(RawWebsocket, SessionPid) of
-        wait          -> {ok, Req, S, case HT of hibernate -> hibernate; _ -> infinity end};
-        {ok, Data}    -> self() ! go,
-                         {reply, {text, Data}, Req, S};
-        {close, <<>>} -> {shutdown, Req, S};
-        {close, Data} -> self() ! shutdown,
-                         {reply, {text, Data}, Req, S}
+        {wait, Timeout} -> {ok, Req, S, Timeout};
+        {ok, Data}      -> self() ! go,
+                           {reply, {text, Data}, Req, S};
+        {close, <<>>}   -> {shutdown, Req, S};
+        {close, Data}   -> self() ! shutdown,
+                           {reply, {text, Data}, Req, S}
     end;
 websocket_info(shutdown, Req, S) ->
     {shutdown, Req, S};
 websocket_info(hibernate_triggered, Req, S) ->
     {ok, Req, S, hibernate}.
 
-websocket_terminate(_Reason, _Req, {RawWebsocket, SessionPid, _HT}) ->
+websocket_terminate(_Reason, _Req, {RawWebsocket, SessionPid}) ->
     sockjs_ws_handler:close(RawWebsocket, SessionPid),
     ok.

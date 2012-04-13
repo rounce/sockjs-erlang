@@ -249,7 +249,7 @@ handle_call({reply, Pid, Multiple}, _From, State = #session{
                            {reply, {ok, {heartbeat, nil}}, State1};
         {[], _TRef}     -> State1 = mark_waiting(Pid, State),
                            {State2, Timeout} = mh(State1),
-                           {reply, wait, State2, Timeout};
+                           {reply, {wait, Timeout}, State2, Timeout};
         _More           -> State1 = unmark_waiting(Pid, State),
                            {reply, {ok, {data, Messages}},
                             State1#session{outbound_queue = Q1}}

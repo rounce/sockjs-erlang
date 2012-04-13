@@ -189,7 +189,7 @@ chunk_start(Req, Headers, ContentType) ->
 reply_loop(Req, SessionId, ResponseLimit, Fmt, Service) ->
     Req0 = sockjs_http:hook_tcp_close(Req),
     case sockjs_session:reply(SessionId) of
-        wait           -> receive
+        {wait, _Timeout} -> receive
                               %% In Cowboy we need to capture async
                               %% messages from the tcp connection -
                               %% ie: {active, once}.

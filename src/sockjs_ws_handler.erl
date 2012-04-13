@@ -36,8 +36,8 @@ reply(websocket, SessionPid) ->
         {W, Frame} when W =:= ok orelse W =:= close->
             Frame1 = sockjs_util:encode_frame(Frame),
             {W, iolist_to_binary(Frame1)};
-        wait ->
-            wait
+        {wait, Timeout} ->
+            {wait, Timeout}
     end;
 reply(rawwebsocket, SessionPid) ->
     case sockjs_session:reply(SessionPid, false) of
@@ -48,8 +48,8 @@ reply(rawwebsocket, SessionPid) ->
                 {data, [Msg]}             -> {ok, iolist_to_binary(Msg)};
                 {heartbeat, nil}          -> reply(rawwebsocket, SessionPid)
             end;
-        wait ->
-            wait
+        {wait, Timeout} ->
+            {wait, Timeout}
     end.
 
 -spec close(websocket|rawwebsocket, pid()) -> ok.
