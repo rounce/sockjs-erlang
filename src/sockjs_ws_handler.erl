@@ -25,9 +25,9 @@ received(rawwebsocket, SessionPid, Data) ->
 
 session_received(Messages, SessionPid) ->
     try sockjs_session:received(Messages, SessionPid) of
-        ok         -> ok
+        {ok, Timeout} -> {ok, Timeout}
     catch
-        no_session -> shutdown
+        no_session    -> shutdown
     end.
 
 -spec reply(websocket|rawwebsocket, pid()) -> {close|open, binary()} | wait.

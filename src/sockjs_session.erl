@@ -58,8 +58,8 @@ maybe_create(SessionId, Service, Info) ->
 -spec received(list(iodata()), session_or_pid()) -> ok.
 received(Messages, SessionPid) when is_pid(SessionPid) ->
     case gen_server:call(SessionPid, {received, Messages}, infinity) of
-        ok    -> ok;
-        error -> throw(no_session)
+        {ok, Timeout}    -> {ok, Timeout};
+        error            -> throw(no_session)
                  %% TODO: should we respond 404 when session is closed?
     end;
 received(Messages, SessionId) ->
@@ -259,7 +259,8 @@ handle_call({received, Messages}, _From, State = #session{ready_state = open}) -
     State2 = lists:foldl(fun(Msg, State1) ->
                                  emit({recv, iolist_to_binary(Msg)}, State1)
                          end, State, Messages),
-    {reply, ok, State2};
+    {State3, Timeout} = mh(State2),
+    {reply, {ok, Timeout}, State3, Timeout};
 
 handle_call({received, _Data}, _From, State = #session{ready_state = _Any}) ->
     {reply, error, State};
@@ -302,7 +303,11 @@ handle_info(force_shutdown, State) ->
 handle_info(session_timeout, State = #session{response_pid = undefined}) ->
     {stop, normal, State};
 
-handle_info(hibernate_triggered, State) ->
+handle_info(hibernate_triggered, #session{response_pid = RPid} = State) ->
+    case RPid of
+        undefined -> ok;
+        _         -> RPid ! hibernate_triggered
+    end,
     {noreply, State#session{hibernate_tref = undefined}, hibernate};
 
 handle_info(heartbeat_triggered, State = #session{response_pid = RPid}) when RPid =/= undefined ->
