@@ -21,7 +21,7 @@
                   heartbeat_tref               :: reference() | triggered,
                   heartbeat_delay = 25000      :: non_neg_integer(),
                   hibernate_tref               :: reference(),
-                  hibernate_delay              :: non_neg_integer() | hibernate,
+                  hibernate_delay              :: non_neg_integer() | hibernate | infinity,
                   ready_state = connecting     :: connecting | open | closed,
                   close_msg                    :: {non_neg_integer(), string()},
                   callback,
@@ -169,6 +169,8 @@ emit(What, State = #session{callback = Callback,
     end.
 
 mh(#session{hibernate_delay = hibernate} = State) -> {State, hibernate};
+
+mh(#session{hibernate_delay = infinity} = State) -> {State, infinity};
 
 mh(#session{hibernate_delay = HibTimeout, heartbeat_delay = HeartbeatDelay} = State) when HibTimeout >= HeartbeatDelay -> {State, infinity};
 
