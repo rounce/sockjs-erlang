@@ -47,7 +47,8 @@ websocket_init(_TransportName, Req,
 
 websocket_handle({text, Data}, Req, {RawWebsocket, SessionPid} = S) ->
     case sockjs_ws_handler:received(RawWebsocket, SessionPid, Data) of
-        {ok, Timeout} -> {ok, Req, S, Timeout};
+        {ok, hibernate} -> {ok, Req, S, hibernate};
+        {ok, _Timeout} -> {ok, Req, S};
         shutdown      -> {shutdown, Req, S}
     end;
 websocket_handle(_Unknown, Req, S) ->
@@ -55,7 +56,8 @@ websocket_handle(_Unknown, Req, S) ->
 
 websocket_info(go, Req, {RawWebsocket, SessionPid} = S) ->
     case sockjs_ws_handler:reply(RawWebsocket, SessionPid) of
-        {wait, Timeout} -> {ok, Req, S, Timeout};
+        {wait, hibernate} -> {ok, Req, S, hibernate};
+        {wait, _Timeout} -> {ok, Req, S};
         {ok, Data}      -> self() ! go,
                            {reply, {text, Data}, Req, S};
         {close, <<>>}   -> {shutdown, Req, S};
