@@ -189,27 +189,8 @@ chunk_start(Req, Headers, ContentType) ->
 reply_loop(Req, SessionId, ResponseLimit, Fmt, Service) ->
     Req0 = sockjs_http:hook_tcp_close(Req),
     case sockjs_session:reply(SessionId) of
-        wait           -> receive
-                              %% In Cowboy we need to capture async
-                              %% messages from the tcp connection -
-                              %% ie: {active, once}.
-                              {tcp_closed, _} ->
-                                  Req0;
-                              %% In Cowboy we may in theory get real
-                              %% http requests, this is bad.
-                              {tcp, _S, Data} ->
-                                  error_logger:error_msg(
-                                    "Received unexpected data on a "
-                                    "long-polling http connection: ~p. "
-                                    "Connection aborted.~n",
-                                    [Data]),
-                                  Req1 = sockjs_http:abruptly_kill(Req),
-                                  Req1;
-                              go ->
-                                  Req1 = sockjs_http:unhook_tcp_close(Req0),
-                                  reply_loop(Req1, SessionId, ResponseLimit,
-                                             Fmt, Service)
-                          end;
+        {wait, hibernate} -> catch erlang:hibernate(?MODULE, reply_loop_wait, [Req0, SessionId, ResponseLimit, Fmt, Service, infinity]);
+        {wait, Timeout} -> reply_loop_wait(Req0, SessionId, ResponseLimit, Fmt, Service, Timeout);
         session_in_use -> Frame = sockjs_util:encode_frame({close, ?STILL_OPEN}),
                           chunk_end(Req0, Frame, Fmt);
         {close, Frame} -> Frame1 = sockjs_util:encode_frame(Frame),
@@ -220,6 +201,29 @@ reply_loop(Req, SessionId, ResponseLimit, Fmt, Service) ->
                           reply_loop0(Req2, SessionId,
                                       ResponseLimit - size(Frame2),
                                       Fmt, Service)
+    end.
+
+reply_loop_wait(Req0, SessionId, ResponseLimit, Fmt, Service, Timeout) ->
+    receive
+        %% In Cowboy we need to capture async
+        %% messages from the tcp connection -
+        %% ie: {active, once}.
+        {tcp_closed, _} -> Req0;
+        %% In Cowboy we may in theory get real
+        %% http requests, this is bad.
+        {tcp, _S, Data} ->
+            error_logger:error_msg(
+                "Received unexpected data on a "
+                "long-polling http connection: ~p. "
+                "Connection aborted.~n",
+                [Data]),
+            sockjs_http:abruptly_kill(Req0);
+        go ->
+            Req1 = sockjs_http:unhook_tcp_close(Req0),
+            reply_loop(Req1, SessionId, ResponseLimit,
+                       Fmt, Service)
+    after
+        Timeout -> catch erlang:hibernate(?MODULE, reply_loop_wait, [Req0, SessionId, ResponseLimit, Fmt, Service, infinity])
     end.
 
 reply_loop0(Req, _SessionId, ResponseLimit, _Fmt, _Service) when ResponseLimit =< 0 ->

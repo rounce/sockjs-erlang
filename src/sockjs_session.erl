@@ -20,6 +20,8 @@
                   disconnect_delay = 5000      :: non_neg_integer(),
                   heartbeat_tref               :: reference() | triggered,
                   heartbeat_delay = 25000      :: non_neg_integer(),
+                  hibernate_tref               :: reference(),
+                  hibernate_delay              :: non_neg_integer() | hibernate | infinity,
                   ready_state = connecting     :: connecting | open | closed,
                   close_msg                    :: {non_neg_integer(), string()},
                   callback,
@@ -56,9 +58,8 @@ maybe_create(SessionId, Service, Info) ->
 -spec received(list(iodata()), session_or_pid()) -> ok.
 received(Messages, SessionPid) when is_pid(SessionPid) ->
     case gen_server:call(SessionPid, {received, Messages}, infinity) of
-        ok    -> ok;
-        error -> throw(no_session)
-                 %% TODO: should we respond 404 when session is closed?
+        {ok, Timeout}    -> {ok, Timeout};
+        error            -> throw(no_session)
     end;
 received(Messages, SessionId) ->
     received(Messages, spid(SessionId)).
@@ -173,12 +174,27 @@ emit(What, State = #session{callback = Callback,
         ok               -> State
     end.
 
+mh(#session{hibernate_delay = hibernate} = State) -> {State, hibernate};
+
+mh(#session{hibernate_delay = infinity} = State) -> {State, infinity};
+
+mh(#session{hibernate_delay = HibTimeout, heartbeat_delay = HeartbeatDelay} = State) when HibTimeout >= HeartbeatDelay -> {State, infinity};
+
+mh(#session{hibernate_delay = HibTimeout, hibernate_tref = TRef} = State) ->
+    case TRef of
+        undefined -> ok;
+        _ -> sockjs_util:cancel_send_after(TRef, hibernate_triggered)
+    end,
+    TRef2 = erlang:send_after(HibTimeout, self(), hibernate_triggered),
+    {State#session{hibernate_tref = TRef2}, infinity}.
+
 %% --------------------------------------------------------------------------
 
 -spec init({session_or_undefined(), service(), info()}) -> {ok, #session{}}.
 init({SessionId, #service{callback         = Callback,
                           state            = UserState,
                           disconnect_delay = DisconnectDelay,
+                          hib_timeout      = HibTimeout,
                           heartbeat_delay  = HeartbeatDelay}, Info}) ->
     case SessionId of
         undefined -> ok;
@@ -186,7 +202,7 @@ init({SessionId, #service{callback         = Callback,
     end,
     process_flag(trap_exit, true),
     TRef = erlang:send_after(DisconnectDelay, self(), session_timeout),
-    {ok, #session{id               = SessionId,
+    State = #session{id               = SessionId,
                   callback         = Callback,
                   state            = UserState,
                   response_pid     = undefined,
@@ -194,7 +210,11 @@ init({SessionId, #service{callback         = Callback,
                   disconnect_delay = DisconnectDelay,
                   heartbeat_tref   = undefined,
                   heartbeat_delay  = HeartbeatDelay,
-                  handle           = {?MODULE, {self(), Info}}}}.
+                  hibernate_tref   = undefined,
+                  hibernate_delay  = HibTimeout,
+                  handle           = {?MODULE, {self(), Info}}},
+    {State2, Timeout} = mh(State),
+    {ok, State2, Timeout}.
 
 
 handle_call({reply, Pid, _Multiple}, _From, State = #session{
@@ -235,7 +255,8 @@ handle_call({reply, Pid, Multiple}, _From, State = #session{
         {[], triggered} -> State1 = unmark_waiting(Pid, State),
                            {reply, {ok, {heartbeat, nil}}, State1};
         {[], _TRef}     -> State1 = mark_waiting(Pid, State),
-                           {reply, wait, State1};
+                           {State2, Timeout} = mh(State1),
+                           {reply, {wait, Timeout}, State2, Timeout};
         _More           -> State1 = unmark_waiting(Pid, State),
                            {reply, {ok, {data, Messages}},
                             State1#session{outbound_queue = Q1}}
@@ -245,7 +266,8 @@ handle_call({received, Messages}, _From, State = #session{ready_state = open}) -
     State2 = lists:foldl(fun(Msg, State1) ->
                                  emit({recv, iolist_to_binary(Msg)}, State1)
                          end, State, Messages),
-    {reply, ok, State2};
+    {State3, Timeout} = mh(State2),
+    {reply, {ok, Timeout}, State3, Timeout};
 
 handle_call({received, _Data}, _From, State = #session{ready_state = _Any}) ->
     {reply, error, State};
@@ -290,7 +312,8 @@ handle_info(session_timeout, State = #session{response_pid = undefined}) ->
 
 handle_info(heartbeat_triggered, State = #session{response_pid = RPid}) when RPid =/= undefined ->
     RPid ! go,
-    {noreply, State#session{heartbeat_tref = triggered}};
+    {State2, Timeout} = mh(State),
+    {noreply, State2#session{heartbeat_tref = triggered}, Timeout};
 
 handle_info(Info, State) ->
     {stop, {odd_info, Info}, State}.

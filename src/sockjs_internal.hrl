@@ -14,6 +14,7 @@
                   websocket        :: boolean(),
                   disconnect_delay :: non_neg_integer(),
                   heartbeat_delay  :: non_neg_integer(),
+                  hib_timeout      :: non_neg_integer() | hibernate | infinity,
                   response_limit   :: non_neg_integer(),
                   logger           :: logger()
                   }).
